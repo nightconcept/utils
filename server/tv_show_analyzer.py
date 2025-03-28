@@ -148,20 +148,21 @@ def perform_organization(show_path: str, files_to_organize: Dict[int, List[str]]
                 logger.error(f"Failed to move '{source_path}' to '{destination_path}': {e}")
 
 
-def analyze_existing_seasons(show_path: str, args: argparse.Namespace) -> Tuple[bool, bool]:
+def analyze_existing_seasons(show_path: str, args: argparse.Namespace) -> Tuple[Dict[int, List[str]], Dict[int, str]]:
     """
     Analyze existing 'Season X' folders for inconsistency and holes.
-    Returns a tuple: (all_seasons_consistent, all_seasons_complete).
-    Logs details of issues found.
+    Returns two dictionaries:
+    - season_inconsistencies: {season_num: list_of_tags}
+    - season_holes: {season_num: hole_description_string}
+    Logs details of issues found based on log level.
     """
     show_name = os.path.basename(show_path)
     if args.verbose:
         print(f"\n--- Analyzing Existing Season Folders ---")
     logger.info(f"Analyzing existing seasons for: {show_name}")
     season_folders_found = False
-    all_consistent = True
-    all_complete = True
-    # season_results = {} # Store results per season - not currently used but could be
+    season_inconsistencies: Dict[int, List[str]] = {}
+    season_holes: Dict[int, str] = {}
 
     try:
         items = sorted(os.listdir(show_path)) # Sort for consistent order
@@ -175,42 +176,49 @@ def analyze_existing_seasons(show_path: str, args: argparse.Namespace) -> Tuple[
                     if args.verbose:
                         print(f"\n  Analyzing Folder: '{item}' (Season {season_num})")
                     logger.info(f"Analyzing folder: {item_path}")
-                    consistent, complete = analyze_single_season_folder(item_path, season_num, args)
-                    # season_results[season_num] = (consistent, complete)
-                    if not consistent:
-                        all_consistent = False
-                    if not complete:
-                        all_complete = False
+                    inconsistent_tags, hole_description = analyze_single_season_folder(item_path, season_num, args)
+
+                    if inconsistent_tags is not None:
+                        season_inconsistencies[season_num] = inconsistent_tags
+                    if hole_description is not None:
+                        season_holes[season_num] = hole_description
 
         if not season_folders_found:
             if args.verbose:
                 print("  No 'Season X' folders found to analyze.")
             logger.info(f"No 'Season X' folders found in {show_name}")
-            # If no season folders, it's trivially consistent and complete
-            return True, True
+            # Return empty dicts if no seasons found
+            return {}, {}
 
     except FileNotFoundError:
         logger.error(f"Show directory not found during season analysis: {show_path}")
-        return False, False # Error state
+        return {}, {"error": f"Show directory not found: {show_path}"} # Indicate error
     except Exception as e:
         logger.error(f"Error analyzing existing seasons for '{show_path}': {e}")
-        return False, False # Error state
+        return {}, {"error": f"Error analyzing seasons: {e}"} # Indicate error
 
+    # Determine overall status for logging summary
+    all_consistent = not bool(season_inconsistencies)
+    all_complete = not bool(season_holes)
     logger.info(f"Finished analyzing existing seasons for: {show_name}. Consistent: {all_consistent}, Complete: {all_complete}")
-    return all_consistent, all_complete
+
+    return season_inconsistencies, season_holes
 
 
-def analyze_single_season_folder(season_path: str, season_num: int, args: argparse.Namespace) -> Tuple[bool, bool]:
+def analyze_single_season_folder(season_path: str, season_num: int, args: argparse.Namespace) -> Tuple[Optional[List[str]], Optional[str]]:
     """
     Analyze a specific season folder for naming inconsistency and episode holes.
-    Returns a tuple: (is_consistent, is_complete). Logs details of issues.
+    Returns a tuple: (inconsistent_tags, hole_description).
+    - inconsistent_tags: List of tags if inconsistent, None otherwise.
+    - hole_description: String describing holes if incomplete, None otherwise.
+    Logs details of issues based on log level.
     """
     folder_name = os.path.basename(season_path)
     episodes: Dict[int, str] = {}
     release_tags: Set[str] = set()
     filenames: List[str] = []
-    is_consistent = True
-    is_complete = True
+    inconsistent_tags: Optional[List[str]] = None
+    hole_description: Optional[str] = None
 
     try:
         for item in os.listdir(season_path):
@@ -246,8 +254,9 @@ def analyze_single_season_folder(season_path: str, season_num: int, args: argpar
             if args.verbose: print(f"    ❌ {msg}")
             logger.warning(msg)
             # Log only the distinct tags found, not every filename
-            logger.warning(f"  Tags found: {', '.join(sorted(list(release_tags)))}")
-            is_consistent = False
+            sorted_tags = sorted(list(release_tags))
+            logger.warning(f"  Tags found: {', '.join(sorted_tags)}")
+            inconsistent_tags = sorted_tags
         else:
             if args.verbose: print(f"    ✅ Naming Consistency: Appears consistent.")
             logger.info(f"Naming appears consistent in {folder_name}")
@@ -256,10 +265,14 @@ def analyze_single_season_folder(season_path: str, season_num: int, args: argpar
         min_ep = min(episodes.keys())
         max_ep = max(episodes.keys())
 
+        # 2. Season Hole Check
+        min_ep = min(episodes.keys())
+        max_ep = max(episodes.keys())
+
         if len(episodes) == 1:
              if args.verbose: print(f"    ✅ Season Completeness: Only one episode (E{max_ep}) found.")
              logger.info(f"Only one episode (E{max_ep}) found in {folder_name}")
-             is_complete = True # Single episode is considered complete
+             # hole_description remains None
         else:
             expected_episodes = set(range(1, max_ep + 1)) # Assume seasons start at 1
             found_episodes = set(episodes.keys())
@@ -268,71 +281,102 @@ def analyze_single_season_folder(season_path: str, season_num: int, args: argpar
             hole_messages = []
             log_hole_messages = []
             if min_ep > 1:
-                 hole_messages.append(f"Starts at episode {min_ep}, not 1.")
-                 log_hole_messages.append(f"Starts at episode {min_ep}, not 1.")
-                 is_complete = False
+                 hole_messages.append(f"Starts at episode {min_ep}, not 1")
+                 log_hole_messages.append(f"Starts at episode {min_ep}, not 1")
 
             if missing_episodes:
                 hole_messages.append(f"Missing episode(s): {missing_episodes}")
                 log_hole_messages.append(f"Missing episode(s): {missing_episodes}")
-                is_complete = False
 
             if not hole_messages:
                  if args.verbose: print(f"    ✅ Season Completeness: No episodes missing between 1-{max_ep}.")
                  logger.info(f"No episodes missing between 1-{max_ep} in {folder_name}")
-                 is_complete = True
+                 # hole_description remains None
             else:
                  msg = f"Season Hole: {'; '.join(hole_messages)}"
                  log_msg = f"Season Hole in {folder_name}: {'; '.join(log_hole_messages)}"
                  if args.verbose: print(f"    ❌ {msg}")
                  logger.warning(log_msg)
+                 hole_description = log_msg # Store the description
 
 
     except FileNotFoundError:
         logger.error(f"Season directory not found during analysis: {season_path}")
-        return False, False # Error state
+        return None, "Error: Directory not found" # Indicate error
     except Exception as e:
         logger.error(f"Error analyzing season folder '{season_path}': {e}")
-        return False, False # Error state
+        return None, f"Error: {e}" # Indicate error
 
-    return is_consistent, is_complete
+    return inconsistent_tags, hole_description
 
 
 # --- Main Execution ---
 
-def analyze_show(show_path: str, args: argparse.Namespace) -> Tuple[bool, bool]:
-    """Runs all analyses for a single show folder."""
+# Define a structure to hold detailed results for a show
+class ShowAnalysisResult:
+    def __init__(self, show_name: str):
+        self.show_name = show_name
+        self.needs_org: bool = False
+        self.season_inconsistencies: Dict[int, List[str]] = {}
+        self.season_holes: Dict[int, str] = {}
+        self.overall_consistent: bool = True
+        self.overall_complete: bool = True
+
+def analyze_show(show_path: str, args: argparse.Namespace) -> ShowAnalysisResult:
+    """Runs all analyses for a single show folder and returns detailed results."""
     show_name = os.path.basename(show_path)
+    result = ShowAnalysisResult(show_name)
+
     if args.verbose:
         print(f"\n{'='*10} Analyzing Show: {show_name} {'='*10}")
     logger.info(f"Starting analysis for show: {show_name} ({show_path})")
 
-    needs_org = analyze_season_organization(show_path, args)
-    all_consistent, all_complete = analyze_existing_seasons(show_path, args)
+    result.needs_org = analyze_season_organization(show_path, args)
+    result.season_inconsistencies, result.season_holes = analyze_existing_seasons(show_path, args)
+
+    # Determine overall status based on collected details
+    result.overall_consistent = not bool(result.season_inconsistencies)
+    result.overall_complete = not bool(result.season_holes)
 
     if args.verbose:
         print(f"\n--- Show Summary: {show_name} ---")
-        print(f"  Needs Season Organization: {'Yes' if needs_org else 'No'}")
-        print(f"  Overall Naming Consistency: {'✅ Consistent' if all_consistent else '❌ Inconsistent'}")
-        print(f"  Overall Season Completeness: {'✅ Complete' if all_complete else '❌ Incomplete'}")
+        print(f"  Needs Season Organization: {'Yes' if result.needs_org else 'No'}")
+        print(f"  Overall Naming Consistency: {'✅ Consistent' if result.overall_consistent else '❌ Inconsistent'}")
+        print(f"  Overall Season Completeness: {'✅ Complete' if result.overall_complete else '❌ Incomplete'}")
 
-    logger.info(f"Finished analysis for show: {show_name}. Needs Org: {needs_org}, Consistent: {all_consistent}, Complete: {all_complete}")
-    return all_consistent, all_complete
+    logger.info(f"Finished analysis for show: {show_name}. Needs Org: {result.needs_org}, Consistent: {result.overall_consistent}, Complete: {result.overall_complete}")
+    return result
 
 
 def setup_logging(args: argparse.Namespace):
     """Configures console and file logging."""
     log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    logger.setLevel(logging.DEBUG) # Capture everything for the file log
+    logger.setLevel(logging.DEBUG) # Capture debug+ for potential processing
 
-    # File Handler (always INFO level)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = f"tv_analysis_{timestamp}.log"
-    file_handler = logging.FileHandler(log_filename)
-    file_handler.setFormatter(log_formatter)
-    file_handler.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
-    print(f"Logging detailed analysis to: {log_filename}") # Inform user about log file
+    # Clear previous handlers if any (useful for re-runs in interactive sessions)
+    # logger.handlers.clear() # Re-evaluating if this is needed/safe
+
+    # File Handler (conditional)
+    file_handler = None
+    if args.log_level < 2:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filename = f"tv_analysis_{timestamp}.log"
+        try:
+            file_handler = logging.FileHandler(log_filename)
+            file_handler.setFormatter(log_formatter)
+            # Set level based on log_level for file
+            if args.log_level == 0:
+                file_handler.setLevel(logging.INFO) # Default: info, warning, error
+            elif args.log_level == 1:
+                # Level 1: Only log critical+ initially, will log summary later
+                file_handler.setLevel(logging.CRITICAL + 1)
+            logger.addHandler(file_handler)
+            print(f"Logging to: {log_filename} (Level: {args.log_level})")
+        except Exception as e:
+            print(f"Error setting up log file '{log_filename}': {e}")
+            file_handler = None # Ensure it's None if setup fails
+    else:
+        print("File logging disabled.")
 
     # Console Handler (level depends on verbose flag)
     console_handler = logging.StreamHandler()
@@ -368,6 +412,13 @@ def main():
         "-i", "--interactive",
         action="store_true",
         help="Enable interactive mode to confirm season organization actions."
+    )
+    parser.add_argument(
+        "--log-level",
+        type=int,
+        choices=[0, 1, 2],
+        default=0,
+        help="Set log file verbosity: 0=Default (summarized issues), 1=Issues List Only, 2=Disabled."
     )
     args = parser.parse_args()
 
@@ -415,23 +466,55 @@ def main():
     print(f"\nStarting analysis for {len(shows_to_analyze)} show(s)...")
 
     total_shows = 0
-    consistent_shows = 0
-    complete_shows = 0
+    all_results: List[ShowAnalysisResult] = [] # Store detailed results
 
     for show_path in sorted(shows_to_analyze):
         try:
             # Pass args down to analysis functions
-            is_consistent, is_complete = analyze_show(show_path, args)
+            show_result = analyze_show(show_path, args)
+            all_results.append(show_result)
             total_shows += 1
-            if is_consistent:
-                consistent_shows += 1
-            if is_complete:
-                complete_shows += 1
+            # Overall consistency/completeness tracked within ShowAnalysisResult
         except Exception as e:
             show_name = os.path.basename(show_path)
             logger.exception(f"Unexpected error analyzing show '{show_name}': {e}") # Use logger.exception to include traceback
 
-    # --- Final Summary Report ---
+    # --- Log Level 1 Output ---
+    if args.log_level == 1 and total_shows > 0:
+        issues_log = []
+        for result in all_results:
+            if not result.overall_consistent:
+                for season_num, tags in sorted(result.season_inconsistencies.items()):
+                     issues_log.append(f"Inconsistent Naming: {result.show_name} Season {season_num} (Tags: {tags})")
+            if not result.overall_complete:
+                 for season_num, desc in sorted(result.season_holes.items()):
+                      issues_log.append(f"Incomplete Season: {result.show_name} Season {season_num} ({desc})")
+
+        if issues_log:
+            # Find the file handler to write the summary
+            file_handler = next((h for h in logger.handlers if isinstance(h, logging.FileHandler)), None)
+            if file_handler:
+                original_level = file_handler.level
+                try:
+                    file_handler.setLevel(logging.INFO) # Ensure INFO level for this summary
+                    logger.info("--- Issues Summary (Log Level 1) ---")
+                    for issue in sorted(issues_log): # Sort the final list
+                        logger.info(issue)
+                    logger.info("--- End Issues Summary ---")
+                finally:
+                    file_handler.setLevel(original_level) # Reset level if needed
+            else:
+                 # Should not happen if log_level < 2, but handle defensively
+                 logger.error("Log Level 1 specified but no file handler found to write summary.")
+        else:
+             logger.info("--- Issues Summary (Log Level 1): No inconsistencies or incomplete seasons found. ---")
+
+
+    # --- Final Summary Report (Console) ---
+    # Calculate overall stats from collected results
+    consistent_shows = sum(1 for r in all_results if r.overall_consistent)
+    complete_shows = sum(1 for r in all_results if r.overall_complete)
+
     summary_lines = [
         "\n" + "=" * 40,
         "          Analysis Summary Report",
