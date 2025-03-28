@@ -3,13 +3,14 @@
 import os
 import shutil
 import logging
+import zipfile # Added for zipping
 from datetime import datetime
 
 # --- Configuration ---
 # Directory containing the Docker config folders to back up
-SOURCE_CONFIG_DIR = "/path/to/your/docker/configs"
+SOURCE_CONFIG_DIR = "/home/danny/config"
 # Mounted directory where backups should be stored
-BACKUP_DEST_DIR = "/mnt/backup/docker_configs"
+BACKUP_DEST_DIR = "/mnt/titan/Backups/docker_config/temp"
 # Log file location
 LOG_FILE = "/var/log/docker_config_backup.log"
 # --- End Configuration ---
@@ -90,10 +91,48 @@ def backup_configs():
     logging.info("Backup process finished.")
     logging.info(f"Directories successfully backed up: {copied_count}")
     logging.info(f"Directories with errors: {error_count}")
+
+    # --- Zipping and Cleanup ---
+    if copied_count > 0 or error_count > 0: # Only zip if something was attempted
+        logging.info("Attempting to create zip archive...")
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            # Place the zip file in the parent directory of BACKUP_DEST_DIR
+            backup_parent_dir = os.path.dirname(BACKUP_DEST_DIR)
+            zip_filename_base = f"docker_configs_backup_{timestamp}"
+            zip_filepath_base = os.path.join(backup_parent_dir, zip_filename_base)
+
+            logging.info(f"Creating archive: {zip_filepath_base}.zip")
+            # shutil.make_archive creates the archive.
+            # Parameters: base_name, format, root_dir
+            # base_name: path to the file to create, excluding format-specific extension (e.g., '.zip')
+            # format: 'zip', 'tar', 'gztar', 'bztar', or 'xztar'
+            # root_dir: directory that will be the root of the archive. All paths in the archive will be relative to this.
+            archive_path = shutil.make_archive(
+                base_name=zip_filepath_base,
+                format='zip',
+                root_dir=BACKUP_DEST_DIR
+            )
+            logging.info(f"Successfully created archive: {archive_path}")
+
+            # Cleanup: Remove the original backup directory after successful zipping
+            try:
+                logging.info(f"Attempting to remove original backup directory: {BACKUP_DEST_DIR}")
+                shutil.rmtree(BACKUP_DEST_DIR)
+                logging.info(f"Successfully removed original backup directory: {BACKUP_DEST_DIR}")
+            except OSError as e:
+                logging.error(f"Failed to remove original backup directory '{BACKUP_DEST_DIR}': {e}")
+
+        except Exception as e:
+            logging.error(f"Failed to create or cleanup zip archive: {e}")
+    else:
+        logging.info("No directories were processed, skipping zip creation.")
+
+    logging.info("--------------------")
+    logging.info("Backup script finished.")
     logging.info("--------------------")
 
 
 if __name__ == "__main__":
     print("Executing backup script...") # Added for debugging linter issues
     backup_configs()
-    
