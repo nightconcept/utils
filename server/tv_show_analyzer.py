@@ -87,20 +87,17 @@ def analyze_season_organization(show_path: str, args: argparse.Namespace) -> boo
             return False
 
         # Log and potentially print details
-        logger.warning(f"Potential Season Organization Needed for: {show_name}")
+        log_summary = [f"Potential Season Organization Needed for: {show_name}"]
         if args.verbose or args.interactive: # Show details if verbose or interactive
              print("  Potential Season Organization Needed:")
-        details_for_log = []
         for season_num, files in sorted(files_to_organize.items()):
             target_folder_name = f"Season {season_num}"
+            file_count = len(files)
+            # Print summary instead of individual files
             if args.verbose or args.interactive:
-                print(f"    Would create folder: '{target_folder_name}'")
-            details_for_log.append(f"  Season {season_num}:")
-            for file in sorted(files):
-                if args.verbose or args.interactive:
-                    print(f"      - Move file: '{file}'")
-                details_for_log.append(f"    - {file}")
-        logger.warning("\n".join(details_for_log)) # Log the detailed list
+                print(f"    Would create folder: '{target_folder_name}' (for {file_count} files)")
+            log_summary.append(f"  Season {season_num}: {file_count} files")
+        logger.warning("\n".join(log_summary)) # Log the summary list
 
         # Interactive Prompt
         if args.interactive:
@@ -248,10 +245,8 @@ def analyze_single_season_folder(season_path: str, season_num: int, args: argpar
             msg = f"Naming Inconsistency: Found {len(release_tags)} potential release patterns in {folder_name}."
             if args.verbose: print(f"    ❌ {msg}")
             logger.warning(msg)
+            # Log only the distinct tags found, not every filename
             logger.warning(f"  Tags found: {', '.join(sorted(list(release_tags)))}")
-            # Log filenames if inconsistent
-            for fname in sorted(filenames):
-                 logger.warning(f"    - {fname}")
             is_consistent = False
         else:
             if args.verbose: print(f"    ✅ Naming Consistency: Appears consistent.")
