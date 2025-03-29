@@ -19,6 +19,20 @@ log() {
 # Start backup
 log "Starting backup: $BACKUP_NAME"
 
+# Check dependencies
+check_dependencies() {
+    if ! command -v zip >/dev/null 2>&1; then
+        log "zip not found - attempting to install..."
+        if ! sudo apt-get update && sudo apt-get install -y zip; then
+            log "ERROR: Failed to install zip package"
+            exit 1
+        fi
+    fi
+}
+
+# Check and install dependencies
+check_dependencies
+
 # Create zip archive
 if ! zip -r "$ZIP_FILE" "$BACKUP_SOURCE" >/dev/null 2>&1; then
     log "ERROR: Failed to create zip archive"
