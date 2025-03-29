@@ -3,7 +3,7 @@
 # Configuration
 BACKUP_SOURCE="/mnt/dietpi-backup"
 BACKUP_DEST="/mnt/titan/Backups/dietpi"
-LOG_FILE="/var/log/dietpi-network-backup.log"
+LOG_FILE="/root/dietpi-network-backup.log"
 MAX_BACKUPS=5
 
 # Create timestamp
