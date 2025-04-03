@@ -16,7 +16,7 @@ BACKUP_DEST_DIR = "/mnt/titan/Backups/docker_config/temp"
 # Base directory containing the corresponding Docker Compose project folders
 DOCKER_REPO_DIR = "/home/danny/docker" # Example: /path/to/docker/compose/projects
 # Log file location
-LOG_FILE = "/var/log/docker_config_backup.log"
+LOG_FILE = "/home/danny/logs/docker_config_backup.log"
 # Number of backups to keep
 MAX_BACKUPS = 7
 # --- End Configuration ---
